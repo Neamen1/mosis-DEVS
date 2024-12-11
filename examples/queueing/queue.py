@@ -4,7 +4,7 @@ from pypdevs.DEVS import AtomicDEVS
 class QueueState:
     def __init__(self, outputs):
         # Keep a list of all idle processors
-        self.idle_procs = range(outputs)
+        self.idle_procs = list(range(outputs))
         # Keep a list that is the actual queue data structure
         self.queue = []
         # Keep the process that is currently being processed
