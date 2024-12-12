@@ -4,13 +4,15 @@ import random
 
 # Define the state of the generator as a structured object
 class GeneratorState:
-    def __init__(self, gen_num):
+    def __init__(self, gen_num, seed=0):
         # Current simulation time (statistics)
         self.current_time = 0.0
         # Remaining time until generation of new event
         self.remaining = 0.0
         # Counter on how many events to generate still
         self.to_generate = gen_num
+        # State of our random number generator
+        self.random = random.Random(seed)
 
 class Generator(AtomicDEVS):
     def __init__(self, gen_param, size_param, gen_num):
@@ -34,7 +36,7 @@ class Generator(AtomicDEVS):
             self.state.remaining = float('inf')
         else:
             # Still have to generate events, so sample for new duration
-            self.state.remaining = random.expovariate(self.gen_param)
+            self.state.remaining = self.state.random.expovariate(self.gen_param)
         return self.state
 
     def timeAdvance(self):
@@ -43,7 +45,7 @@ class Generator(AtomicDEVS):
 
     def outputFnc(self):
         # Determine size of the event to generate
-        size = max(1, int(random.gauss(self.size_param, 5)))
+        size = max(1, int(self.state.random.gauss(self.size_param, 5)))
         # Calculate current time (note the addition!)
         creation = self.state.current_time + self.state.remaining
         # Output the new event on the output port
