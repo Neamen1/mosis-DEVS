@@ -33,6 +33,10 @@ class RouterState:
     You will need to track:
     - Products waiting to be dispatched (buffer)
     - Which machines are available (and their remaining capacities)
+    - IMPORTANT: Which product_type each machine is currently batching (None if empty)
+      * Machines can only process one product type at a time
+      * When dispatching, only send products matching the machine's current batch type
+      * Reset batch type when machine becomes empty (capacity = full capacity)
     - Routing time for the current product being dispatched
     - Any other information needed for your dispatching strategy
     """
@@ -171,24 +175,27 @@ class Machine(AtomicDEVS):
     Parameters:
         machine_id (str): Identifier for this machine (e.g., 'A', 'B')
         capacity (int): Maximum capacity of the machine
-        processing_duration (float): Time to process a batch
         max_wait_duration (float): Maximum time to wait before processing a non-full batch
     
     Behavior:
     - Accepts products from router (if capacity allows)
+    - IMPORTANT: Can only batch products of the SAME product_type together
+      * When receiving a product, validate it matches the existing batch type (if any)
+      * Raise ValueError if different types are mixed (this catches Router bugs)
     - Waits for more products or until max_wait_duration expires
+    - Processing duration comes from product.processing_times[machine_id]
+      * All products in a batch have same type, so same processing time
     - Processes all products in batch
     - Sends processed products back to router
     
     You need to define appropriate input/output ports and implement the DEVS functions.
     """
-    def __init__(self, machine_id, capacity, processing_duration, max_wait_duration):
+    def __init__(self, machine_id, capacity, max_wait_duration):
         super().__init__(f"Machine_{machine_id}")
         
         # Parameters
         self.machine_id = machine_id
         self.capacity = capacity
-        self.processing_duration = processing_duration
         self.max_wait_duration = max_wait_duration
         
         # State

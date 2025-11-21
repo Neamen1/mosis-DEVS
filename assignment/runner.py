@@ -25,9 +25,6 @@ target_num = 500  # Number of finished products required to terminate simulation
 # How often to generate a product (on average)
 gen_rate = 1/60/4  # once every 4 minutes
 
-# Product types: (size, recipe, probability)
-gen_types = [(1, ['A', 'B'], 2/3), (2, ['B', 'A'], 1/3)]
-
 # Dispatching strategies
 strategies = {
     # you can comment out one of these lines to reduce the number of experiments (useful for debugging):
@@ -39,19 +36,31 @@ strategies = {
 CONFIGURATIONS = {
     'baseline': {
         'machine_capacities': {'A': 3, 'B': 2},
-        'processing_durations': {'A': 15*60, 'B': 10*60}
+        'gen_types': [
+            (0, 1, ['A', 'B'], {'A': 15*60, 'B': 10*60}, 2/3),
+            (1, 2, ['B', 'A'], {'A': 20*60, 'B': 13*60}, 1/3)
+        ]
     },
     'add-new-machines': {
         'machine_capacities': {'A': 3, 'B': 2, 'A_new': 3, 'B_new': 2},
-        'processing_durations': {'A': 15*60, 'B': 10*60, 'A_new': 15*60, 'B_new': 10*60},
+        'gen_types': [
+            (0, 1, ['A', 'B'], {'A': 15*60, 'B': 10*60}, 2/3),
+            (1, 2, ['B', 'A'], {'A': 20*60, 'B': 13*60}, 1/3)
+        ]
     },
     'double-capacity': {
         'machine_capacities': {'A': 6, 'B': 4},
-        'processing_durations': {'A': 15*60, 'B': 10*60}
+        'gen_types': [
+            (0, 1, ['A', 'B'], {'A': 15*60, 'B': 10*60}, 2/3),
+            (1, 2, ['B', 'A'], {'A': 20*60, 'B': 13*60}, 1/3)
+        ]
     },
     'double-speed': {
         'machine_capacities': {'A': 3, 'B': 2},
-        'processing_durations': {'A': 7.5*60, 'B': 5*60}
+        'gen_types': [
+            (0, 1, ['A', 'B'], {'A': 7.5*60, 'B': 5*60}, 2/3),
+            (1, 2, ['B', 'A'], {'A': 10*60, 'B': 6.5*60}, 1/3)
+        ]
     }
 }
 
@@ -79,9 +88,8 @@ for config_name, config in CONFIGURATIONS.items():
                 seed=0,
                 target_num=target_num,
                 gen_rate=gen_rate,
-                gen_types=gen_types,
+                gen_types=config['gen_types'],
                 machine_capacities=config['machine_capacities'],
-                processing_durations=config['processing_durations'],
                 dispatching_strategy=strategy_id,
                 max_wait_duration=max_wait_duration,
             )

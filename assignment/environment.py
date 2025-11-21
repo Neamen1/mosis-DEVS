@@ -15,19 +15,23 @@ class Product:
     Represents a product in the manufacturing system.
     
     Attributes:
+        product_type (int): The type identifier for this product (products of the same type can be batched)
         size (int): The size of the product (e.g., 1 or 2)
         recipe (list): The sequence of machine operations (e.g., ['A', 'B'] or ['B', 'A'])
+        processing_times (dict): Processing time for each machine in recipe (e.g., {'A': 900, 'B': 600})
         current_step (int): The current step in the recipe (0-indexed)
         arrival_time (float): The time when the product entered the system
     """
-    def __init__(self, size, recipe, creation_time):
+    def __init__(self, product_type, size, recipe, processing_times, creation_time):
+        self.product_type = product_type
         self.size = size
         self.recipe = recipe
+        self.processing_times = processing_times
         self.current_step = 0
         self.arrival_time = creation_time
     
     def __repr__(self):
-        return f"Product(size={self.size}, recipe={self.recipe}, step={self.current_step})"
+        return f"Product(type={self.product_type}, size={self.size}, recipe={self.recipe}, step={self.current_step})"
 
 class GeneratorState:
     def __init__(self, seed=0):
@@ -47,13 +51,14 @@ class Generator(AtomicDEVS):
     Parameters:
         seed (int): Seed for the random number generator
         lambd (float): Rate parameter for exponential distribution (products/second)
-        gen_types (list of tuples): List of (size, recipe, probability) tuples defining product types
-                                     E.g., [(1, ['A', 'B'], 2/3), (2, ['B', 'A'], 1/3)]
+        gen_types (list of tuples): List of (product_type, size, recipe, processing_times, probability) tuples
+                                     E.g., [(0, 1, ['A', 'B'], {'A': 900, 'B': 600}, 2/3), 
+                                            (1, 2, ['B', 'A'], {'A': 1200, 'B': 800}, 1/3)]
     
     Output Ports:
         out_product: Outputs a Product object when generated
     """
-    def __init__(self, seed=0, lambd=1.0/60.0/4.0, gen_types=[(1, ['A', 'B'], 2/3), (2, ['B', 'A'], 1/3)]):
+    def __init__(self, seed=0, lambd=1.0/60.0/4.0, gen_types=[(0, 1, ['A', 'B'], {'A': 900, 'B': 600}, 2/3), (1, 2, ['B', 'A'], {'A': 1200, 'B': 800}, 1/3)]):
         super().__init__("Generator")
         
         # Output port for the product
@@ -69,13 +74,13 @@ class Generator(AtomicDEVS):
     
     def _nextProduct(self):
         # Randomly select a product type based on probabilities
-        types = [t[:2] for t in self.gen_types]  # Extract (size, recipe) tuples
-        weights = [t[2] for t in self.gen_types]  # Extract probabilities
-        size, recipe = self.state.random.choices(types, weights=weights)[0]
+        types = [t[:4] for t in self.gen_types]  # Extract (product_type, size, recipe, processing_times) tuples
+        weights = [t[4] for t in self.gen_types]  # Extract probabilities
+        product_type, size, recipe, processing_times = self.state.random.choices(types, weights=weights)[0]
         # Calculate creation time
         creation = self.state.current_time + self.state.remaining
         # Update state
-        self.state.next_product = Product(size, recipe, creation)
+        self.state.next_product = Product(product_type, size, recipe, processing_times, creation)
         self.state.remaining = self.state.random.expovariate(self.lambd)
     
     def intTransition(self):
