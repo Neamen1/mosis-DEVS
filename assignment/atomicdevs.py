@@ -31,7 +31,7 @@ class RouterState:
     State of the Router.
     
     You will need to track:
-    - Products waiting to be dispatched (buffer)
+    - Products waiting to be dispatched (queue/buffer)
     - Which machines are available (and their remaining capacities)
     - IMPORTANT: Which product_type each machine is currently batching (None if empty)
       * Machines can only process one product type at a time
@@ -40,6 +40,10 @@ class RouterState:
     - Routing time for the current product being dispatched
     - Any other information needed for your dispatching strategy
     """
+    # Queue statistics tracking
+    last_time: float = 0.0  # Time of last state change
+    total_queue_area: float = 0.0  # Cumulative sum of (queue_length × time_duration)
+    
     def __init__(self, machine_names):
         # TODO: Initialize your router state
         pass
@@ -97,6 +101,7 @@ class AbstractRouter(AtomicDEVS):
         # TODO: Implement external transition
         # - Handle products arriving from generator or machines
         # - Update machine availability information if machines notify you
+        # - Update queue statistics when queue length changes
         # - Decide if you can dispatch a product
         pass
     
@@ -111,7 +116,26 @@ class AbstractRouter(AtomicDEVS):
     
     def intTransition(self):
         # TODO: Update state after dispatching a product
+        # - Update queue statistics when queue length changes
         pass
+    
+    def getAverageQueueLength(self, current_time):
+        """
+        Calculate the time-weighted average queue length.
+        
+        Args:
+            current_time: The current simulation time
+        
+        Returns:
+            The average queue length over the simulation period
+        
+        Note: You must update self.state.total_queue_area and self.state.last_time 
+              in both extTransition and intTransition whenever the queue length changes.
+              Formula: total_queue_area += queue_length * (current_time - last_time)
+        """
+        if current_time > 0:
+            return self.state.total_queue_area / current_time
+        return 0.0
 
 
 class FIFORouter(AbstractRouter):

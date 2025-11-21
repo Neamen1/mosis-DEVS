@@ -14,8 +14,6 @@ sys.path.insert(0, os.path.dirname(__file__))
 
 from pypdevs.simulator import Simulator
 from plot_template import make_plot_products_script, make_plot_box_script, make_plot_frequency_script
-
-# from system_solution import * # Teacher's solution
 from system import *
 
 ## Parameters ##
@@ -106,10 +104,16 @@ for config_name, config in CONFIGURATIONS.items():
             values.append([product.flow_time for product in finished_products])
             
             # Print machine statistics
-            simulation_time = sim.termination_time
+            # Use the router's last_time which tracks the actual time
+            simulation_time = sys_model.router.state.last_time
+            
             for machine_name, machine in sys_model.machines.items():
                 utilization, avg_occupancy, num_batches = machine.getStatistics(simulation_time)
                 print(f"  Machine {machine_name}: Utilization={utilization*100:.1f}%, Avg Occupancy={avg_occupancy:.2f}, Batches={num_batches}")
+            
+            # Print router queue statistics
+            avg_queue_length = sys_model.router.getAverageQueueLength(simulation_time)
+            print(f"  Router: Avg Queue Length={avg_queue_length:.2f}")
         
         # Write out all the product flow times for every 'max_wait_duration' parameter
         #  for every product, we write a line:
@@ -139,7 +143,7 @@ for config_name, config in CONFIGURATIONS.items():
                 config=config_name,
                 strategy=strategy_name,
                 max_waits=[mwd/60 for mwd in max_wait_durations],  # Convert to minutes
-                gen_num=gen_num,
+                gen_num=target_num,
             ))
 
 # Finally, write out a single gnuplot script that plots everything
