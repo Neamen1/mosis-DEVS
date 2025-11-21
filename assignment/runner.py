@@ -20,13 +20,13 @@ from system import *
 
 ## Parameters ##
 
-gen_num = 500  # how many products to generate
+target_num = 500  # Number of finished products required to terminate simulation
 
 # How often to generate a product (on average)
 gen_rate = 1/60/4  # once every 4 minutes
 
-# Product types: (size, recipe)
-gen_types = [(1, ['A', 'B']), (1, ['A', 'B']), (2, ['B', 'A'])]
+# Product types: (size, recipe, probability)
+gen_types = [(1, ['A', 'B'], 2/3), (2, ['B', 'A'], 1/3)]
 
 # Dispatching strategies
 strategies = {
@@ -77,7 +77,7 @@ for config_name, config in CONFIGURATIONS.items():
             
             sys_model = FlexibleJobShop(
                 seed=0,
-                gen_num=gen_num,
+                target_num=target_num,
                 gen_rate=gen_rate,
                 gen_types=gen_types,
                 machine_capacities=config['machine_capacities'],
@@ -89,11 +89,19 @@ for config_name, config in CONFIGURATIONS.items():
             sim = Simulator(sys_model)
             sim.setClassicDEVS()
             # sim.setVerbose()  # <-- uncomment to see what's going on
+            sim.setTerminationCondition(lambda time, model: sys_model.sink.termination_condition())
             sim.simulate()
             
-            # All the products that made it through
-            products = sys_model.sink.state.products
-            values.append([product.flow_time for product in products])
+            # All the finished (non-spoiled) products that made it through
+            finished_products = [p for p in sys_model.sink.state.products 
+                                if not hasattr(p, 'is_spoiled') or not p.is_spoiled]
+            values.append([product.flow_time for product in finished_products])
+            
+            # Print machine statistics
+            simulation_time = sim.termination_time
+            for machine_name, machine in sys_model.machines.items():
+                utilization, avg_occupancy, num_batches = machine.getStatistics(simulation_time)
+                print(f"  Machine {machine_name}: Utilization={utilization*100:.1f}%, Avg Occupancy={avg_occupancy:.2f}, Batches={num_batches}")
         
         # Write out all the product flow times for every 'max_wait_duration' parameter
         #  for every product, we write a line:
@@ -101,7 +109,7 @@ for config_name, config in CONFIGURATIONS.items():
         filename = f'{outdir}/output_{config_name}_{strategy_name}.csv'
         with open(filename, 'w') as f:
             try:
-                for i in range(gen_num):
+                for i in range(target_num):
                     f.write("%s" % i)
                     for j in range(len(values)):
                         # Convert to minutes for readability
@@ -109,7 +117,7 @@ for config_name, config in CONFIGURATIONS.items():
                     f.write("\n")
             except IndexError as e:
                 raise Exception(
-                    "There was an IndexError, meaning that fewer products have made it to the sink than expected.\n"
+                    "There was an IndexError, meaning that fewer finished products have made it to the sink than expected.\n"
                     "Your model is not (yet) correct."
                 ) from e
         

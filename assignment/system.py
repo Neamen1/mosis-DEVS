@@ -10,9 +10,9 @@ class FlexibleJobShop(CoupledDEVS):
     
     Parameters:
         seed (int): Random seed for generator
-        gen_num (int): Number of products to generate
+        target_num (int): Number of finished products required to terminate simulation
         gen_rate (float): Product generation rate (products/second)
-        gen_types (list of tuples): Product types as (size, recipe) tuples
+        gen_types (list of tuples): Product types as (size, recipe, probability) tuples
         machine_capacities (dict): Capacity for each machine, e.g., {'A': 3, 'B': 2}
         processing_durations (dict): Processing duration for each machine, e.g., {'A': 15*60, 'B': 10*60}
         dispatching_strategy (int): STRATEGY_FIFO or STRATEGY_PRIORITY
@@ -20,9 +20,9 @@ class FlexibleJobShop(CoupledDEVS):
     """
     def __init__(self,
         seed=0,
-        gen_num=500,
+        target_num=500,
         gen_rate=1.0/60.0/4.0,  # once every 4 minutes
-        gen_types=[(1, ['A', 'B']), (1, ['A', 'B']), (2, ['B', 'A'])],
+        gen_types=[(1, ['A', 'B'], 2/3), (2, ['B', 'A'], 1/3)],
         machine_capacities={'A': 3, 'B': 2},
         processing_durations={'A': 15*60, 'B': 10*60},  # in seconds
         dispatching_strategy=STRATEGY_FIFO,
@@ -30,12 +30,11 @@ class FlexibleJobShop(CoupledDEVS):
     ):
         super().__init__("FlexibleJobShop")
         
-        # Create generator (provided)
+        # Create generator (provided) - generates infinitely
         generator = self.addSubModel(Generator(
             seed=seed,
             lambd=gen_rate,
             gen_types=gen_types,
-            gen_num=gen_num,
         ))
         
         # TODO: Create router based on dispatching strategy
@@ -47,8 +46,8 @@ class FlexibleJobShop(CoupledDEVS):
         # TODO: Create machines based on machine_capacities and processing_durations
         machines = {}  # TODO: Dictionary mapping machine_id to Machine instance
         
-        # Create sink (provided)
-        sink = self.addSubModel(Sink())
+        # Create sink (provided) - terminates when target_num finished products received
+        sink = self.addSubModel(Sink(target_num=target_num))
         
         # TODO: Connect the components
         # - Generator -> Router
@@ -59,4 +58,5 @@ class FlexibleJobShop(CoupledDEVS):
         # Store references for later access
         self.generator = generator
         self.sink = sink
+        self.machines = machines  # Store machines dict for statistics
 

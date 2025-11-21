@@ -30,13 +30,11 @@ class Product:
         return f"Product(size={self.size}, recipe={self.recipe}, step={self.current_step})"
 
 class GeneratorState:
-    def __init__(self, gen_num, seed=0):
+    def __init__(self, seed=0):
         # Current simulation time
         self.current_time = 0.0
         # Remaining time until generation of new product
         self.remaining = 0.0
-        # Counter on how many products to generate still
-        self.to_generate = gen_num
         # Next product to output
         self.next_product = None
         # State of our random number generator
@@ -44,19 +42,18 @@ class GeneratorState:
 
 class Generator(AtomicDEVS):
     """
-    Generator creates products at pseudo-random time intervals.
+    Generator creates products at pseudo-random time intervals (infinitely).
     
     Parameters:
         seed (int): Seed for the random number generator
         lambd (float): Rate parameter for exponential distribution (products/second)
-        gen_types (list of tuples): List of (size, recipe) tuples defining product types
-                                     E.g., [(1, ['A', 'B']), (1, ['A', 'B']), (2, ['B', 'A'])]
-        gen_num (int): Total number of products to generate
+        gen_types (list of tuples): List of (size, recipe, probability) tuples defining product types
+                                     E.g., [(1, ['A', 'B'], 2/3), (2, ['B', 'A'], 1/3)]
     
     Output Ports:
         out_product: Outputs a Product object when generated
     """
-    def __init__(self, seed=0, lambd=1.0/60.0/4.0, gen_types=[(1, ['A', 'B']), (1, ['A', 'B']), (2, ['B', 'A'])], gen_num=500):
+    def __init__(self, seed=0, lambd=1.0/60.0/4.0, gen_types=[(1, ['A', 'B'], 2/3), (2, ['B', 'A'], 1/3)]):
         super().__init__("Generator")
         
         # Output port for the product
@@ -67,12 +64,14 @@ class Generator(AtomicDEVS):
         self.gen_types = gen_types
         
         # Initialize state
-        self.state = GeneratorState(gen_num, seed)
+        self.state = GeneratorState(seed)
         self._nextProduct()  # Schedule the first product
     
     def _nextProduct(self):
-        # Randomly select a product type from gen_types
-        size, recipe = self.state.random.choice(self.gen_types)
+        # Randomly select a product type based on probabilities
+        types = [t[:2] for t in self.gen_types]  # Extract (size, recipe) tuples
+        weights = [t[2] for t in self.gen_types]  # Extract probabilities
+        size, recipe = self.state.random.choices(types, weights=weights)[0]
         # Calculate creation time
         creation = self.state.current_time + self.state.remaining
         # Update state
@@ -82,15 +81,8 @@ class Generator(AtomicDEVS):
     def intTransition(self):
         # Update simulation time
         self.state.current_time += self.timeAdvance()
-        # Update number of generated products
-        self.state.to_generate -= 1
-        if self.state.to_generate == 0:
-            # Already generated enough products, so stop
-            self.state.remaining = float('inf')
-            self.state.next_product = None
-        else:
-            # Still have to generate products, so sample for new duration
-            self._nextProduct()
+        # Generate next product (infinitely)
+        self._nextProduct()
         return self.state
     
     def timeAdvance(self):
@@ -103,10 +95,11 @@ class Generator(AtomicDEVS):
 
 
 class SinkState:
-    def __init__(self):
+    def __init__(self, target_num):
         # Contains received products and simulation time
         self.products = []
         self.current_time = 0.0
+        self.target_num = target_num  # Number of finished products needed to terminate
 
 class Sink(AtomicDEVS):
     """
@@ -115,12 +108,17 @@ class Sink(AtomicDEVS):
     For each product, it computes the total time spent in the system
     (current_time - arrival_time).
     
+    The simulation terminates when the sink receives target_num finished products.
+    
+    Parameters:
+        target_num (int): Number of finished products required to terminate simulation
+    
     Input Ports:
         in_product: Receives finished Product objects
     """
-    def __init__(self):
+    def __init__(self, target_num=500):
         super().__init__("Sink")
-        self.state = SinkState()
+        self.state = SinkState(target_num)
         # Has only one input port
         self.in_product = self.addInPort("in_product")
     
@@ -139,7 +137,22 @@ class Sink(AtomicDEVS):
         self.state.products.append(product)
         return self.state
     
-    # Don't define anything else, as we only store products.
-    # Sink has no behaviour of its own.
+    def finished_products_count(self):
+        """
+        Count finished (non-spoiled) products.
+        For base assignment, all products are finished.
+        For bonus, check is_spoiled attribute.
+        """
+        count = 0
+        for p in self.state.products:
+            if not hasattr(p, 'is_spoiled') or not p.is_spoiled:
+                count += 1
+        return count
+    
+    def termination_condition(self):
+        """
+        Returns True when enough finished products have been received.
+        """
+        return self.finished_products_count() >= self.state.target_num
 
 ### END OF PROVIDED CODE - DO NOT EDIT ###

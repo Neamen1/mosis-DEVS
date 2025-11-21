@@ -33,6 +33,7 @@ class RouterState:
     You will need to track:
     - Products waiting to be dispatched (buffer)
     - Which machines are available (and their remaining capacities)
+    - Routing time for the current product being dispatched
     - Any other information needed for your dispatching strategy
     """
     def __init__(self, machine_names):
@@ -42,6 +43,9 @@ class RouterState:
 class AbstractRouter(AtomicDEVS):
     """
     Abstract base class for routers.
+    
+    The router takes time to dispatch products, with larger products taking longer.
+    Routing time = product.size × routing_time_per_size
     
     The Router receives products from:
     - Generator (new products entering the system)
@@ -53,8 +57,12 @@ class AbstractRouter(AtomicDEVS):
     
     You need to define appropriate input/output ports and implement the DEVS functions.
     """
-    def __init__(self, name, machine_names):
+    def __init__(self, name, machine_names, routing_time_per_size=30.0):
         super().__init__(name)
+        
+        # Parameters
+        self.machine_names = machine_names
+        self.routing_time_per_size = routing_time_per_size  # Time per unit size (e.g., 30 seconds)
         
         # TODO: Define input ports
         # - from generator
@@ -66,9 +74,6 @@ class AbstractRouter(AtomicDEVS):
         
         # State
         self.state = RouterState(machine_names)
-        
-        # Parameters
-        self.machine_names = machine_names
     
     @abc.abstractmethod
     def _selectProduct(self, waiting_products):
@@ -92,7 +97,8 @@ class AbstractRouter(AtomicDEVS):
         pass
     
     def timeAdvance(self):
-        # TODO: Return 0 if you have products to dispatch, inf otherwise
+        # TODO: Return routing time (product.size × routing_time_per_size) if dispatching,
+        # otherwise return inf when idle
         pass
     
     def outputFnc(self):
@@ -108,8 +114,8 @@ class FIFORouter(AbstractRouter):
     """
     FIFO Router: Dispatches products in First-In-First-Out order.
     """
-    def __init__(self, machine_names):
-        super().__init__("FIFORouter", machine_names)
+    def __init__(self, machine_names, routing_time_per_size=30.0):
+        super().__init__("FIFORouter", machine_names, routing_time_per_size)
     
     def _selectProduct(self, waiting_products):
         # TODO: Implement FIFO selection (first product in the list)
@@ -120,8 +126,8 @@ class PriorityRouter(AbstractRouter):
     """
     Priority Router: Dispatches larger products before smaller products.
     """
-    def __init__(self, machine_names):
-        super().__init__("PriorityRouter", machine_names)
+    def __init__(self, machine_names, routing_time_per_size=30.0):
+        super().__init__("PriorityRouter", machine_names, routing_time_per_size)
     
     def _selectProduct(self, waiting_products):
         # TODO: Implement priority selection (larger products first)
@@ -142,8 +148,14 @@ class MachineState:
     - Current mode (e.g., waiting, processing, notifying)
     - Remaining time until processing starts/completes
     """
+    # Statistics tracking
+    total_processing_time: float = 0.0  # Total time spent processing
+    total_occupancy_product: float = 0.0  # Sum of (capacity_used * processing_duration)
+    num_batches: int = 0  # Number of batches processed
+    
     def __init__(self, capacity):
         # TODO: Initialize your machine state
+        # Note: Statistics are already initialized above
         pass
     
     def usedCapacity(self):
@@ -202,6 +214,23 @@ class Machine(AtomicDEVS):
         pass
     
     def intTransition(self):
-        # TODO: Update state after processing or notifying
+        # TODO: Update state after processing or notifying. Also update statistics.
         pass
+    
+    def getStatistics(self, simulation_time):
+        """
+        Get machine utilization statistics (pre-implemented for performance analysis).
+        Returns: (utilization, avg_occupancy, num_batches)
+        """
+        if simulation_time > 0:
+            utilization = self.state.total_processing_time / simulation_time
+        else:
+            utilization = 0.0
+        
+        if self.state.total_processing_time > 0:
+            avg_occupancy = self.state.total_occupancy_product / self.state.total_processing_time
+        else:
+            avg_occupancy = 0.0
+        
+        return (utilization, avg_occupancy, self.state.num_batches)
 
