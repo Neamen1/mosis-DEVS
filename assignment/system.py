@@ -36,26 +36,39 @@ class FlexibleJobShop(CoupledDEVS):
             lambd=gen_rate,
             gen_types=gen_types,
         ))
-        
-        # TODO: Create router based on dispatching strategy
+
+        # Helper variables
+        machine_names = list(machine_capacities.keys())
+
         # Pass routing_time_per_size to the router constructor
         if dispatching_strategy == STRATEGY_FIFO:
-            router = None  # TODO: Create FIFORouter
+            router = self.addSubModel(FIFORouter(machine_names, routing_time_per_size))
         elif dispatching_strategy == STRATEGY_PRIORITY:
-            router = None  # TODO: Create PriorityRouter
+            router = self.addSubModel(PriorityRouter(machine_names, routing_time_per_size))
+        else:
+            raise ValueError("Unknown dispatching strategy: {}".format(dispatching_strategy))
         
-        # TODO: Create machines based on machine_capacities
+        # Create machines based on machine_capacities
         # Note: Processing times come from the products themselves, not from machine parameters
-        machines = {}  # TODO: Dictionary mapping machine_id to Machine instance
+        machines = {}
+        for name in machine_capacities.keys():
+            machines[name] = self.addSubModel(Machine(name, machine_capacities[name], max_wait_duration))
         
         # Create sink (provided) - terminates when target_num finished products received
         sink = self.addSubModel(Sink(target_num=target_num))
         
-        # TODO: Connect the components
+        # Connect the components
         # - Generator -> Router
+        self.connectPorts(generator.OPorts[0], router.generator_input)
+        
         # - Router -> Machines
         # - Machines -> Router
+        for name in machine_capacities.keys():
+            self.connectPorts(router.machine_outputs[name], machines[name].IPorts[0])
+            self.connectPorts(machines[name].OPorts[0], router.machine_inputs[name])
+        
         # - Router -> Sink
+        self.connectPorts(router.sink_output, sink.IPorts[0])
         
         # Store references for later access
         self.generator = generator

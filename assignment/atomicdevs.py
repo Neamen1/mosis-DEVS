@@ -2,6 +2,7 @@ from pypdevs.DEVS import AtomicDEVS
 from environment import *
 import abc
 import dataclasses
+from math import inf
 
 # ============================================================================
 # IMPORTANT: PyPDEVS List Wrapping
@@ -44,9 +45,18 @@ class RouterState:
     last_time: float = 0.0  # Time of last state change
     total_queue_area: float = 0.0  # Cumulative sum of (queue_length × time_duration)
     
-    def __init__(self, machine_names):
+    def __init__(self, machine_names, routing_time_per_size):
         # TODO: Initialize your router state
-        pass
+        self.machine_names = machine_names
+        self.capacities = None
+        self.routing_time_per_size = routing_time_per_size
+        self.available = {}
+        self.machine_batch_type = {}
+        for machine in self.machine_names:
+            self.available[machine] = True
+            self.machine_batch_type[machine] = None
+
+
 
 class AbstractRouter(AtomicDEVS):
     """
@@ -71,17 +81,22 @@ class AbstractRouter(AtomicDEVS):
         # Parameters
         self.machine_names = machine_names
         self.routing_time_per_size = routing_time_per_size  # Time per unit size (e.g., 30 seconds)
-        
-        # TODO: Define input ports
+        # INPUT PORTS
         # - from generator
+        self.generator_input = self.addInPort("generator_to_router")
         # - from each machine
-        
-        # TODO: Define output ports
+        self.machine_inputs = {}
+        for name in machine_names:
+            self.machine_inputs[name] = self.addInPort(f"{name}_to_router")
+        # OUTPUT PORTS
         # - to each machine
+        self.machine_outputs = {}
+        for name in machine_names:
+            self.machine_outputs[name] = self.addOutPort(f"router_to_{name}")
         # - to sink
-        
+        self.sink_output = self.addOutPort("router_to_sink")
         # State
-        self.state = RouterState(machine_names)
+        self.state = RouterState(machine_names, routing_time_per_size)
     
     @abc.abstractmethod
     def _selectProduct(self, waiting_products):
@@ -103,12 +118,12 @@ class AbstractRouter(AtomicDEVS):
         # - Update machine availability information if machines notify you
         # - Update queue statistics when queue length changes
         # - Decide if you can dispatch a product
-        pass
+        return self.state
     
     def timeAdvance(self):
         # TODO: Return routing time (product.size × routing_time_per_size) if dispatching,
         # otherwise return inf when idle
-        pass
+        return inf
     
     def outputFnc(self):
         # TODO: Output product to appropriate machine or sink
@@ -117,7 +132,7 @@ class AbstractRouter(AtomicDEVS):
     def intTransition(self):
         # TODO: Update state after dispatching a product
         # - Update queue statistics when queue length changes
-        pass
+        return self.state
     
     def getAverageQueueLength(self, current_time):
         """
@@ -147,7 +162,9 @@ class FIFORouter(AbstractRouter):
     
     def _selectProduct(self, waiting_products):
         # TODO: Implement FIFO selection (first product in the list)
-        pass
+        if len(waiting_products) == 0:
+            return None
+        return waiting_products[0]
 
 
 class PriorityRouter(AbstractRouter):
@@ -159,7 +176,9 @@ class PriorityRouter(AbstractRouter):
     
     def _selectProduct(self, waiting_products):
         # TODO: Implement priority selection (larger products first)
-        pass
+        if len(waiting_products) == 0:
+            return None
+        return max(waiting_products, key=lambda p: (p.current_step, p.size, -p.arrival_time))
 
 
 # ============================================================================
@@ -184,12 +203,18 @@ class MachineState:
     def __init__(self, capacity):
         # TODO: Initialize your machine state
         # Note: Statistics are already initialized above
-        pass
+        self.capacity = capacity
+        self.products = []
+        self.mode = "waiting"
+        self.remaining_time = 0
     
     def usedCapacity(self):
         """Calculate how much capacity is currently used."""
-        # TODO: Sum up sizes of products in the machine
-        pass
+        # Sum sizes of products in the machine
+        used_capacity = 0
+        for product in self.products:
+            used_capacity += product.size
+        return used_capacity
 
 
 class Machine(AtomicDEVS):
@@ -224,14 +249,15 @@ class Machine(AtomicDEVS):
         
         # State
         self.state = MachineState(capacity)
-        
-        # TODO: Define input ports (from router)
-        
-        # TODO: Define output ports (back to router, and to notify availability)
+        # Input port (from router)
+        self.input_port = self.addInPort(f"router_to_{machine_id}")
+        # Output port (back to router, and to notify availability)
+        self.input_port = self.addOutPort(f"{machine_id}_to_router")
     
     def extTransition(self, inputs):
         # TODO: Implement external transition
         # - Handle incoming products from router
+        self.incoming_products = None
         # - Update remaining time if already waiting
         # - Decide when to start processing
         pass
@@ -263,5 +289,5 @@ class Machine(AtomicDEVS):
         else:
             avg_occupancy = 0.0
         
-        return (utilization, avg_occupancy, self.state.num_batches)
+        return utilization, avg_occupancy, self.state.num_batches
 

@@ -22,3 +22,4 @@ env.bak/
 venv.bak/
 src/dist/
 src/PyPDEVS.egg-info/
+__pycache__/
