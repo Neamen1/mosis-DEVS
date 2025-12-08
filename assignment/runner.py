@@ -18,7 +18,7 @@ from system import *
 
 ## Parameters ##
 
-target_num = 500  # Number of finished products required to terminate simulation
+target_num = 1 # 500  # Number of finished products required to terminate simulation
 
 # How often to generate a product (on average)
 gen_rate = 1/60/4  # once every 4 minutes
@@ -94,7 +94,7 @@ for config_name, config in CONFIGURATIONS.items():
             
             sim = Simulator(sys_model)
             sim.setClassicDEVS()
-            # sim.setVerbose()  # <-- uncomment to see what's going on
+            sim.setVerbose()  # <-- uncomment to see what's going on
             sim.setTerminationCondition(lambda time, model: sys_model.sink.termination_condition())
             sim.simulate()
             

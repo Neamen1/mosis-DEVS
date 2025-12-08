@@ -42,9 +42,9 @@ class FlexibleJobShop(CoupledDEVS):
 
         # Pass routing_time_per_size to the router constructor
         if dispatching_strategy == STRATEGY_FIFO:
-            router = self.addSubModel(FIFORouter(machine_names, routing_time_per_size))
+            router = self.addSubModel(FIFORouter(machine_names, machine_capacities, routing_time_per_size))
         elif dispatching_strategy == STRATEGY_PRIORITY:
-            router = self.addSubModel(PriorityRouter(machine_names, routing_time_per_size))
+            router = self.addSubModel(PriorityRouter(machine_names, machine_capacities, routing_time_per_size))
         else:
             raise ValueError("Unknown dispatching strategy: {}".format(dispatching_strategy))
         
