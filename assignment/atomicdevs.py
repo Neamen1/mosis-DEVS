@@ -5,6 +5,7 @@ import dataclasses
 from math import inf
 from collections import deque 
 import time
+from copy import deepcopy
 
 # ============================================================================
 # IMPORTANT: PyPDEVS List Wrapping
@@ -54,9 +55,10 @@ class RouterState:
     
 
     def __init__(self, machine_names, machine_capacities):
-        # TODO: Initialize your router state
+        # Initialize your router state
 
         self.machine_states = {}
+        self.to_sink = deque()
         self.queue_length_general = 0
         self.product_to_dispatch = None
         self.current_routing_time = 0.0
@@ -109,9 +111,7 @@ class AbstractRouter(AtomicDEVS):
             self.machine_outputs[name] = self.addOutPort(f"router_to_{name}")
         # - to sink
         self.sink_output = self.addOutPort("router_to_sink")
-        
-        self.init_time = time.time()   
-        
+                
         # State
         self.state = RouterState(machine_names, machine_capacities)
     
@@ -126,9 +126,10 @@ class AbstractRouter(AtomicDEVS):
         Returns:
             Total number of products waiting to be dispatched
         """
-        total_length = 0
+        total_length = len(self.state.to_sink)
         for machine_state in self.state.machine_states.values():
             total_length += len(machine_state[QUEUE])
+        
         return total_length
 
     @abc.abstractmethod
@@ -146,54 +147,59 @@ class AbstractRouter(AtomicDEVS):
         pass
     
     def extTransition(self, inputs):
-        # TODO: Implement external transition
 
         # - Handle products arriving from generator or machines
         # generator returns: {self.out_product: [self.state.next_product]}
         # machines return a capacity notification and a list of products like: [capacity(int), prod1, prod2...] (can be a notification without product)
         state = self.state
+        
+        queue_length_changed = False    # flag to decide if to update queue statistics
 
-        def assignProductToMachine(product):
-            # get next machine to dispatch to, if any, or send to sink if current_step >= len(recipe)
+        def forwardProduct(product, state):
+            # dispatch to next machine or sink queue
             if product.current_step < len(product.recipe):
                 next_machine = product.recipe[product.current_step]
                 state.machine_states[next_machine][QUEUE].append(product)
             else:
-                # TODO: send to sink (make a list )
-                pass
-        
-        queue_length_changed = False
-        gen_in = inputs[self.generator_input][0]
-        if(gen_in):
-            assignProductToMachine(gen_in)
+                state.to_sink.append(product)
+            
             state.queue_length_general += 1
+            
+        if self.generator_input in inputs and inputs[self.generator_input]:
+            gen_in = inputs[self.generator_input][0]
+            forwardProduct(gen_in, state)
             queue_length_changed = True
-        
         
         # process inputs, filter products and capacity notifications
         # - Update machine availability information if machines notify you
         for machine, port in self.machine_inputs.items():
-            has_notif = False
-            if(isinstance(inputs[port][0], int)):
-                has_notif = True
+            if port not in inputs or not inputs[port]:
+                continue
 
-                current_capacity = inputs[port][0]
-                if(current_capacity > state.machine_states[machine][REMAINING_CAPACITY]):       # more space appears (has remaining capacity). If remaining capacity decreases availability doesn't change
+            port_payload = inputs[port]
+            has_notif = isinstance(port_payload[0], int)
+
+            if has_notif:
+                current_capacity = port_payload[0]
+                
+                # update availability based on capacity change
+                prev_cap = state.machine_states[machine][REMAINING_CAPACITY]
+                if current_capacity > prev_cap:
                     state.machine_states[machine][IS_AVAILABLE] = True
-                    if(current_capacity == self.machine_max_capacities[machine]):               # machine is empty
+                    if current_capacity == self.machine_max_capacities[machine]:
                         state.machine_states[machine][BATCH_TYPE] = None
                 elif(current_capacity==0):      # machine capacity 0 -> no more space or machine is closed
                     state.machine_states[machine][IS_AVAILABLE] = False
                 
                 state.machine_states[machine][REMAINING_CAPACITY] = current_capacity
                 
-                if(len(inputs[port]) < 2):  # no more data except notification
-                    continue
+                # if no products after notification, continue
+                products = port_payload[1:] if len(port_payload) > 1 else []
+            else:
+                products = port_payload
             
-            products = inputs[port][1:] if has_notif else inputs[port]
             for p in products:
-                assignProductToMachine(p)
-                state.queue_length_general += 1
+                forwardProduct(p, state)
                 queue_length_changed = True
 
 
@@ -202,90 +208,100 @@ class AbstractRouter(AtomicDEVS):
             if(state.queue_length_general != self.getQueueLength()):
                 raise ValueError("External queue length count is differrent from actual sum of all machines' queue length")
             
-            curr_time = time.time() - self.init_time
-            time_duration = curr_time - state.last_time
-            state.total_queue_area += state.queue_length_general * time_duration
-            state.last_time = curr_time
+            # accumulate area and advance local last_time with self.elapsed
+            # self.elapsed is the time since last transition (DEVS)
+            state.total_queue_area += state.queue_length_general * self.elapsed
+            state.last_time += self.elapsed
 
 
-        # - Decide if you can dispatch a product
-        if(state.queue_length_general > 0):
+        # - Decide whether you can dispatch a product (only one dispatch at a time)
+        if(state.queue_length_general > 0 and state.product_to_dispatch is None):
+
             for machine_name, machine_state in state.machine_states.items():
                 if(machine_state[IS_AVAILABLE] and len(machine_state[QUEUE])>0):
                     # select product to dispatch
                     product_to_dispatch = self._selectProduct(machine_state[QUEUE])
-                    if(product_to_dispatch is not None):
-                        # set batch type if not set
-                        if(machine_state[BATCH_TYPE] is None):
-                            machine_state[BATCH_TYPE] = product_to_dispatch.product_type
-                        # check if product matches batch type
-                        elif(product_to_dispatch.product_type != machine_state[BATCH_TYPE]):
-                            continue    # type mismatch, cannot dispatch this product now
+                    
+                    if product_to_dispatch is None:
+                        continue
 
-                        if(product_to_dispatch.size > machine_state[REMAINING_CAPACITY]):
-                            continue    # not enough capacity, cannot dispatch this product now
-
-                        # set routing time (at this point product can fit in machine and matches batch type)
+                    if len(product_to_dispatch.recipe) == product_to_dispatch.current_step:
+                        state.product_to_dispatch = (product_to_dispatch, None)
                         state.current_routing_time = product_to_dispatch.size * self.routing_time_per_size
-                        
-                        # store product to output in outputFnc and trigger timeAdvance
-                        state.product_to_dispatch = (product_to_dispatch, machine_name)
-                        break   # only dispatch one product at a time
+                        break
+                    
+                    # router-machines-states overhead:
+                    # batch type logic
+                    if(machine_state[BATCH_TYPE] is None):
+                        machine_state[BATCH_TYPE] = product_to_dispatch.product_type
+                    elif(product_to_dispatch.product_type != machine_state[BATCH_TYPE]):    # if product matches batch type
+                        continue    # type mismatch, cannot dispatch        # TODO: choose another item with appropriate type (filtering?)
+
+                    if(product_to_dispatch.size > machine_state[REMAINING_CAPACITY]):
+                        continue    # not enough capacity, cannot dispatch  # TODO: choose another item with size machine_state[REMAINING_CAPACITY] or lower (filtering?)
+
+                    # set routing time (at this point product can fit in machine and matches batch type)
+                    state.current_routing_time = product_to_dispatch.size * self.routing_time_per_size
+                    # store product to dispatch
+                    state.product_to_dispatch = (product_to_dispatch, machine_name)
+                    break   # dispatch only one product at a time
 
         return state
     
     def timeAdvance(self):
-        # TODO: Return routing time (product.size × routing_time_per_size) if dispatching,
+        # Return routing time (product.size × routing_time_per_size) if dispatching,
         if self.state.product_to_dispatch is not None:
+            # routing time may be zero (immediate dispatch)
             return self.state.current_routing_time
         # otherwise return inf when idle
         return inf
     
     def outputFnc(self):
-        # TODO: Output product to appropriate machine or sink
-        if self.state.product_to_dispatch is not None:
-            product, machine_name = self.state.product_to_dispatch
-            # output to machine or sink
-            if product.current_step < len(product.recipe):
-                # send to machine
-                return {self.machine_outputs[machine_name]: [product]}
-            else:
-                # send to sink
-                return {self.sink_output: [product]}
-        return {}
+        # Output product to appropriate machine or sink
+        if self.state.product_to_dispatch is None:
+            return {}
+        
+        product, machine_name = self.state.product_to_dispatch
+        if product.current_step < len(product.recipe):
+            # send to machine
+            return {self.machine_outputs[machine_name]: [product]}
+        else:
+            # send to sink
+            return {self.sink_output: [product]}
+        
     
     def intTransition(self):
-        # TODO: Update state after dispatching a product
+        # Update state after dispatching a product
         # - Update queue statistics when queue length changes
         state = self.state
+
         if(state.product_to_dispatch is not None):
             product, machine_name = state.product_to_dispatch
 
-            # remove product from machine queue
-            state.machine_states[machine_name][QUEUE].remove(product)
+            # if dispatched to machine, remove from that machine's queue and update capacity
+            if machine_name is not None:
+                # remove product from machine queue
+                state.machine_states[machine_name][QUEUE].remove(product)
 
-            # update remaining capacity
-            state.machine_states[machine_name][REMAINING_CAPACITY] -= product.size
+                # update remaining capacity and availability 
+                state.machine_states[machine_name][REMAINING_CAPACITY] -= product.size
+                if(state.machine_states[machine_name][REMAINING_CAPACITY] == 0):
+                    state.machine_states[machine_name][IS_AVAILABLE] = False
 
-            # update availability
-            if(state.machine_states[machine_name][REMAINING_CAPACITY] == 0):
-                state.machine_states[machine_name][IS_AVAILABLE] = False
-
-            # update product's current step
-            product.current_step += 1
-
+                # update product's current step
+                product.current_step += 1
+            else:
+                state.to_sink.remove(product)
             # decrease general queue length
             state.queue_length_general -= 1
 
-            # reset dispatched product and routing time
-            state.product_to_dispatch = None
-            state.current_routing_time = 0.0
-
             # update queue statistics
-            curr_time = time.time() - self.init_time
-            time_duration = curr_time - state.last_time
-            state.total_queue_area += state.queue_length_general * time_duration
-            state.last_time = curr_time
+            state.total_queue_area += state.queue_length_general * state.current_routing_time
+            state.last_time += state.current_routing_time
+            
+            # reset dispatched product and routing time 
+            state.product_to_dispatch = None
+            state.current_routing_time = 0.0    
 
         return self.state
     
@@ -316,10 +332,13 @@ class FIFORouter(AbstractRouter):
         super().__init__("FIFORouter", machine_names, machine_capacities, routing_time_per_size)
     
     def _selectProduct(self, waiting_products):
-        # TODO: Implement FIFO selection (first product in the list)
-        if len(waiting_products) == 0:
-            return None
-        return waiting_products[0]
+        # FIFO selection (first product in the list)
+        if len(self.state.to_sink)!=0:
+            return self.state.to_sink[0]    # remove is done in intTransition 
+        if(len(waiting_products) != 0):
+            return waiting_products[0]
+            
+        return None
 
 
 class PriorityRouter(AbstractRouter):
@@ -330,10 +349,14 @@ class PriorityRouter(AbstractRouter):
         super().__init__("PriorityRouter", machine_names, machine_capacities, routing_time_per_size)
     
     def _selectProduct(self, waiting_products):
-        # TODO: Implement priority selection (larger products first)
+        # priority selection (larger products first)
+        if len(self.state.to_sink)!=0:
+            return max(self.state.to_sink, key=lambda p: (p.size, -p.arrival_time))
+        
         if len(waiting_products) == 0:
             return None
-        return max(waiting_products, key=lambda p: (p.current_step, p.size, -p.arrival_time))
+        
+        return max(waiting_products , key=lambda p: (p.current_step, p.size, -p.arrival_time))
 
 
 # ============================================================================
@@ -356,12 +379,13 @@ class MachineState:
     num_batches: int = 0  # Number of batches processed
     
     def __init__(self):
-        # TODO: Initialize your machine state
+        # Initialize machine state
         # Note: Statistics are already initialized above
         self.products = []
         self.mode = "waiting"
         self.remaining_time = inf
         self.used_capacity = 0
+        self.countdown_elapsed = None  # Accumulated elapsed time since first product arrived (None when idle)
     
     def getUsedCapacity(self):
         """Calculate how much capacity is currently used."""
@@ -401,7 +425,7 @@ class Machine(AtomicDEVS):
         self.machine_id = machine_id
         self.max_capacity = max_capacity
         self.max_wait_duration = max_wait_duration
-        self.init_time = time.time()
+
         # State
         self.state = MachineState()
         # Input port (from router)
@@ -410,16 +434,28 @@ class Machine(AtomicDEVS):
         self.output_port = self.addOutPort(f"{machine_id}_to_router")
     
     def __repr__(self):
-        utilization, avg_occupancy, num_batches = self.getStatistics(time.time() - self.init_time)
-        return f"Machine(id={self.machine_id}, sim_time={time.time()-self.init_time}, used_capacity={self.state.used_capacity}/{self.max_capacity}, max_wait_duration={self.max_wait_duration},\
-            stats=(utilization={utilization*100:.2f}%, avg_occupancy={avg_occupancy:.2f}, num_batches={num_batches}))"
+        return f"Machine(id={self.machine_id}, used_capacity={self.state.used_capacity}/{self.max_capacity}, max_wait_duration={self.max_wait_duration})"
 
     def extTransition(self, inputs):
-        # TODO: Implement external transition
         # - Handle incoming products from router
         state = self.state
+        # Decrement timers based on time since last transition (self.elapsed)
+        elapsed = getattr(self, 'elapsed', 0.0)
+        # If currently processing, decrement processing remaining time
+        if state.mode == "processing" and state.remaining_time not in (inf, None):
+            state.remaining_time -= elapsed
+            if state.remaining_time < 0:
+                state.remaining_time = 0.0
+        # If waiting countdown active, accumulate elapsed time
+        if state.countdown_elapsed is not None:
+            state.countdown_elapsed += elapsed
+            state.remaining_time = self.max_wait_duration - state.countdown_elapsed
+            if state.remaining_time < 0:
+                state.remaining_time = 0.0
+
         incoming_products = inputs[self.input_port]
         changed_capacity = False
+        # process incoming products if any
         for product in incoming_products:
             # Check if product can fit in machine
             if(state.used_capacity != state.getUsedCapacity()):
@@ -428,8 +464,8 @@ class Machine(AtomicDEVS):
             if(state.used_capacity + product.size > self.max_capacity):
                 raise ValueError(f"Machine {self.machine_id} cannot accept product {product} due to capacity overflow.")
             
-            if state.mode == "processing" or state.mode == "notifying":
-                return state  # cannot accept products while processing or notifying. TODO: check if router will lose a product if it sends the product  
+            if state.mode == "processing":
+                return state  # cannot accept products while processing. TODO: check if router will lose a product if it sends the product at processing
             
             # Check batch type consistency
             if len(state.products) > 0:
@@ -439,71 +475,84 @@ class Machine(AtomicDEVS):
             
             # Accept product
             if(state.used_capacity==0):
-                state.remaining_time = self.max_wait_duration   # set wait timer when first product arrives
+                # First product arrives - initialize countdown accumulator
+                state.countdown_elapsed = 0.0
+                state.remaining_time = self.max_wait_duration
             state.products.append(product)
             state.used_capacity += product.size
             changed_capacity = True
-            
-        
-        # - Update remaining time when already waiting
-        # - Decide when to start processing
-        if state.used_capacity > 0:
-            state.remaining_time -= self.elapsed    # TODO: check if on processing it actually goes <= 0 so it can switch to notifiying in intTransition
-        
-        def start_processing():
+
+        # Decide when to start processing (after possible elapsed updates above)
+        def start_processing(state):
             processing_time = state.products[0].processing_times[self.machine_id]
             state.remaining_time = processing_time
             state.mode = "processing"
+            # reset countdown accumulator (no longer waiting)
+            state.countdown_elapsed = None
 
         if state.mode == "waiting":
-            if changed_capacity:
+            if (state.used_capacity == 0):
+                state.remaining_time = inf      # if empty wait indefinitely for next products
+                return state
+
+            if(state.remaining_time == 0):      # countdown expired -> start processing
+                start_processing(state)
+            elif changed_capacity:
                 if state.used_capacity == self.max_capacity:
-                    start_processing()
-            elif(state.used_capacity > 0):
-                # check if max_wait_duration exceeded
-                if state.remaining_time <= 0:
-                    start_processing()
+                    start_processing(state)
 
         return state
     
     def timeAdvance(self):
-        # TODO: Return appropriate time based on current mode
+        # Return appropriate time based on current mode
         return self.state.remaining_time
     
     def outputFnc(self):
-        # TODO: Output processed products or availability notifications
+        # Output processed products or availability notifications
         state = self.state
-        if state.mode == "notifying":
-            # notify router of available capacity (after processing)
-            available_capacity = self.max_capacity - state.used_capacity
+        if state.mode == "processing":
+            # processing completed -> output processed products (DEVS calls outputFnc at internal event)
+            available_capacity = self.max_capacity
+            # send available capacity (max after processing -> sending finished products out) plus processed products
             return {self.output_port: [available_capacity] + state.products}
-        elif state.mode == "processing":
-            return {self.output_port: [0]}  # notify no capacity while processing
         elif state.mode == "waiting":
             available_capacity = self.max_capacity - state.used_capacity
-            return {self.output_port: [available_capacity]}  # notify available capacity while waiting
+            return {self.output_port: [available_capacity]}  # notify available capacity while waiting (e.g after each product dispatch)
         return {}
     
     def intTransition(self):
-        # TODO: Update state after processing or notifying. Also update statistics.
+        # Update state after processing or notifying. Also update statistics.
         state = self.state
-        if state.mode == "processing":
-            if state.remaining_time <= 0:
-                # now can send products back to router
-                # processing complete
-                state.mode = "notifying"
-                state.remaining_time = 0.0    # immediate notification
-        elif state.mode == "notifying":
-            # after notifying, write statistics
-            state.num_batches += 1 
-            state.total_processing_time += state.products[0].processing_times[self.machine_id]
-            state.total_occupancy_product += state.used_capacity * state.products[0].processing_times[self.machine_id]
 
-            # and go back to waiting
+        # Internal transition handling:
+        # - If we were processing, the internal event corresponds to processing completion.
+        #   DEVS calls outputFnc() first (which returns products), then intTransition() runs.
+        if state.mode == "processing":
+            # processing complete: update statistics and go back to waiting
+            if len(state.products) > 0:
+                processing_time = state.products[0].processing_times[self.machine_id]
+            else:
+                processing_time = 0.0
+
+            state.num_batches += 1
+            state.total_processing_time += processing_time
+            state.total_occupancy_product += state.used_capacity * processing_time
+
+            # clear batch and reset to waiting
             state.products = []
             state.used_capacity = 0
+            state.countdown_elapsed = None
             state.mode = "waiting"
             state.remaining_time = inf    # wait indefinitely for new products
+
+        # If we were waiting and reached countdown (internal event), start processing
+        elif state.mode == "waiting":
+            # internal event for waiting implies countdown expired -> start processing if any products present
+            if state.used_capacity > 0:
+                processing_time = state.products[0].processing_times[self.machine_id]
+                state.remaining_time = processing_time
+                state.mode = "processing"
+                state.countdown_elapsed = None
 
 
         return state

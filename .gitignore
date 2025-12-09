@@ -24,3 +24,4 @@ src/dist/
 src/PyPDEVS.egg-info/
 __pycache__/
 assignment/test.py
+assignment_output/
