@@ -246,6 +246,16 @@ class AbstractRouter(AtomicDEVS):
                     if product_to_dispatch is None:
                         continue
 
+                    # Check if the product got spoiled
+                    if product_to_dispatch.current_step > 0 and product_to_dispatch.last_machine:
+                        if state.last_time - product_to_dispatch.time_in_buffer >= get_spoilage_time(product_to_dispatch.last_machine):
+                            product_to_dispatch.is_spoiled = True
+
+                    if product_to_dispatch.is_spoiled:
+                        state.product_to_dispatch = (product_to_dispatch, machine_name)
+                        state.current_routing_time = product_to_dispatch.size * self.routing_time_per_size
+                        break
+
                     if product_to_dispatch.current_step >= len(product_to_dispatch.recipe):
                         # dispatch to sink
                         state.product_to_dispatch = (product_to_dispatch, None)
@@ -282,7 +292,7 @@ class AbstractRouter(AtomicDEVS):
         if self.state.product_to_dispatch is None:
             return {}
         product, machine_name = self.state.product_to_dispatch
-        if product.current_step < len(product.recipe):
+        if product.current_step < len(product.recipe) and not product.is_spoiled:
             # Send to machine
             return {self.machine_outputs[machine_name]: [product]}
         else:
@@ -295,10 +305,6 @@ class AbstractRouter(AtomicDEVS):
         state = self.state
         if state.product_to_dispatch is not None:
             product, machine_name = state.product_to_dispatch
-            # Check if the product got spoiled
-            if product.current_step > 0 and product.last_machine:
-                if state.last_time - product.time_in_buffer >= get_spoilage_time(product.last_machine):
-                    product.is_spoiled = True
             # If dispatched to a machine, remove from that machine's queue and update capacity
             if machine_name is not None:
                 # Remove product from machine queue
@@ -360,6 +366,7 @@ class FIFORouter(AbstractRouter):
         # Filter by capacity and batch type constraints
         eligible = []
         for product in waiting_products:
+
             # Check capacity constraint
             if product.size > machine_capacity:
                 continue  # Product too large, skip
