@@ -29,6 +29,10 @@ class Product:
         self.processing_times = processing_times
         self.current_step = 0
         self.arrival_time = creation_time
+        # Extension for tracking spoilage
+        self.time_in_buffer = 0
+        self.last_machine = None
+        self.is_spoiled = False
     
     def __repr__(self):
         return f"Product(type={self.product_type}, size={self.size}, recipe={self.recipe}, step={self.current_step})"
@@ -153,6 +157,16 @@ class Sink(AtomicDEVS):
             if not hasattr(p, 'is_spoiled') or not p.is_spoiled:
                 count += 1
         return count
+
+    def spoiled_products_count(self):
+        count = 0
+        for p in self.state.products:
+            if p.is_spoiled:
+                count += 1
+        return count
+
+    def spoiled_products_percentage(self):
+        return (self.spoiled_products_count() / len(self.state.products)) * 100
     
     def termination_condition(self):
         """
