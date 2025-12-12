@@ -169,7 +169,7 @@ class AbstractRouter(AtomicDEVS):
             if product.current_step > 0:
                 product.time_in_buffer = state.last_time + self.elapsed
             # Dispatch to next machine or sink queue
-            if product.current_step < len(product.recipe):
+            if product.current_step < len(product.recipe) and not product.is_spoiled:
                 next_machine = product.recipe[product.current_step]
                 state.machine_states[next_machine][QUEUE].append(product)
             else:
@@ -245,16 +245,6 @@ class AbstractRouter(AtomicDEVS):
                     
                     if product_to_dispatch is None:
                         continue
-
-                    # Check if the product got spoiled
-                    if product_to_dispatch.current_step > 0 and product_to_dispatch.last_machine:
-                        if state.last_time - product_to_dispatch.time_in_buffer >= get_spoilage_time(product_to_dispatch.last_machine):
-                            product_to_dispatch.is_spoiled = True
-
-                    if product_to_dispatch.is_spoiled:
-                        state.product_to_dispatch = (product_to_dispatch, machine_name)
-                        state.current_routing_time = product_to_dispatch.size * self.routing_time_per_size
-                        break
 
                     if product_to_dispatch.current_step >= len(product_to_dispatch.recipe):
                         # dispatch to sink
