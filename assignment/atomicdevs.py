@@ -202,6 +202,7 @@ class AbstractRouter(AtomicDEVS):
             else:
                 products = port_payload
             for p in products:
+                # Keep track that the product was received from the input machine
                 p.last_machine = machine
                 forwardProduct(p, state)
                 queue_length_changed = True
