@@ -213,6 +213,7 @@ class AbstractRouter(AtomicDEVS):
             
             for p in products:
                 # Products returning from machines have completed their operation
+                p.last_machine = machine
                 # Increment current_step here (when receiving back, not when sending)
                 p.current_step += 1
                 forwardProduct(p, state)
@@ -224,7 +225,7 @@ class AbstractRouter(AtomicDEVS):
             # Accumulate area and advance local last_time with self.elapsed
             # self.elapsed is the time since last transition (DEVS)
             state.total_queue_area += state.queue_length_general * self.elapsed
-            state.last_time += self.elapsed
+        state.last_time += self.elapsed
         # - Decide whether you can dispatch a product (only one dispatch at a time)
         if state.queue_length_general > 0 and state.product_to_dispatch is None:
             for machine_name, machine_state in state.machine_states.items():
@@ -295,7 +296,7 @@ class AbstractRouter(AtomicDEVS):
         if state.product_to_dispatch is not None:
             product, machine_name = state.product_to_dispatch
             # Check if the product got spoiled
-            if product.last_machine is not None:
+            if product.current_step > 0 and product.last_machine:
                 if state.last_time - product.time_in_buffer >= get_spoilage_time(product.last_machine):
                     product.is_spoiled = True
             # If dispatched to a machine, remove from that machine's queue and update capacity
@@ -317,7 +318,7 @@ class AbstractRouter(AtomicDEVS):
             # Reset dispatched product and routing time
             state.product_to_dispatch = None
             state.current_routing_time = 0.0
-        return self.state
+        return state
     
     def getAverageQueueLength(self, current_time):
         """

@@ -167,6 +167,22 @@ class Sink(AtomicDEVS):
 
     def spoiled_products_percentage(self):
         return (self.spoiled_products_count() / len(self.state.products)) * 100
+
+    def compare_average_flow_time(self):
+        non_spoiled_products = 0
+        spoiled_products = 0
+        average_flow_time_non_spoiled = 0
+        average_flow_time_spoiled = 0
+        for p in self.state.products:
+            if p.is_spoiled:
+                spoiled_products += 1
+                average_flow_time_spoiled += p.flow_time
+            else:
+                non_spoiled_products += 1
+                average_flow_time_non_spoiled += p.flow_time
+        average_flow_time_non_spoiled /= len(non_spoiled_products)
+        average_flow_time_spoiled /= len(spoiled_products)
+        return average_flow_time_non_spoiled, average_flow_time_spoiled
     
     def termination_condition(self):
         """
