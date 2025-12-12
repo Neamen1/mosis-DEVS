@@ -18,7 +18,7 @@ from system import *
 
 ## Parameters ##
 
-target_num = 64 # 500  # Number of finished products required to terminate simulation
+target_num = 500 # 500  # Number of finished products required to terminate simulation
 
 # How often to generate a product (on average)
 gen_rate = 1/60/4  # once every 4 minutes
@@ -61,10 +61,18 @@ CONFIGURATIONS = {
         ]
     }
 }
-
+CONFIGURATIONS = {
+    'baseline': {
+        'machine_capacities': {'A': 3, 'B': 2},
+        'gen_types': [
+            (0, 1, ['A', 'B'], {'A': 15*60, 'B': 10*60}, 2/3),
+            (1, 2, ['B', 'A'], {'A': 20*60, 'B': 13*60}, 1/3)
+        ]
+    }
+}
 # The different parameters to try for max_wait_duration
 max_wait_durations = [0.0, 3.0*60, 6.0*60]  # 0, 3, 6 minutes (in seconds)
-# max_wait_durations = [180.0]  # <-- uncomment if you only want to run an experiment with this value (useful for debugging)
+max_wait_durations = [180.0]  # <-- uncomment if you only want to run an experiment with this value (useful for debugging)
 
 outdir = "assignment_output"
 
